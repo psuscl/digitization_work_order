@@ -8,6 +8,7 @@ en:
       download_report_button: Download Report
       download_ladybird_export_button: Download Ladybird Export
       download_goobi_export_button: Download Goobi Export
+      download_psul_export_button: Download Work Order
       cancel_button: Cancel
       resource: Resource
       records_selected: Records selected

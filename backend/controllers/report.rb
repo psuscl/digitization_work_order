@@ -72,4 +72,28 @@ class ArchivesSpaceService < Sinatra::Base
     "digitization_work_order_report.#{Resource.id_to_identifier(resource_id).gsub(' ', '_')}.xlsx"
   end
 
+  Endpoint.post('/plugins/digitization_work_order/repositories/:repo_id/psul')
+    .description("Return Excel formatted export for record uris")
+    .params(["repo_id", :repo_id],
+            ["uri", [String], "The uris of the records to include in the report"],
+            ["resource_uri", String, "The resource URI"])
+    .permissions([:view_repository])
+    .returns([200, "report"]) \
+  do
+    [
+      200,
+      {
+        "Content-Type" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition" => "attachment; filename=\"#{psul_export_filename(JSONModel.parse_reference(params[:resource_uri]).fetch(:id))}\""
+      },
+      PsulExport.new(params[:uri], params[:resource_uri]).to_stream
+    ]
+  end
+
+  private
+
+  def psul_export_filename(resource_id)
+    "digitization_work_order_report.#{Resource.id_to_identifier(resource_id).gsub(' ', '_')}.xlsx"
+  end
+
 end

@@ -27,6 +27,8 @@
     <%= render_aspace_partial :partial => "ladybird_export" %>
   <% elsif AppConfig.has_key?(:digitization_work_order_goobi) && AppConfig[:digitization_work_order_goobi] %>
     <%= render_aspace_partial :partial => "goobi_export" %>
+  <% elsif AppConfig.has_key?(:digitization_work_order_psul) && AppConfig[:digitization_work_order_psul] %>
+    <%= render_aspace_partial :partial => "psul_export" %>
   <% else %>
     <%= render_aspace_partial :partial => "do_report" %>
   <% end %>
