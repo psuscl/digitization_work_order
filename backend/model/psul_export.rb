@@ -19,6 +19,8 @@ class PsulExport
     [
       # Title
       {:header => "title", :proc => Proc.new {|row| title(row)}},
+      # Object URI
+      {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
       # Date Created
       {:header => "date created", :proc => Proc.new {|row| creation_date(row)}},
       # Collection
@@ -27,6 +29,8 @@ class PsulExport
       {:header => "finding aid", :proc => Proc.new {|row| ead_location(row)}},
       # Identifier
       {:header => "identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
+      # Container Information
+      {:header => "container information", :proc => Proc.new{|row| container_information(row)}},
       # URL
       {:header => "url", :proc => Proc.new {|row| file_uri(row)}},
     ]
@@ -61,8 +65,12 @@ class PsulExport
     io.string
   end
 
-  def creation_dates_for_resource(id)
-    @resource_creation_dates.fetch(id, [])
+  def container_labels_for_archival_object(id)
+    @container_labels.fetch(id, [])
+  end
+
+  def file_versions_for_archival_object(id)
+    @file_versions.fetch(id, [])
   end
 
   def creation_dates_for_archival_object(id)
@@ -81,25 +89,13 @@ class PsulExport
 
   def dataset
     ds = ArchivalObject
-           .left_outer_join(:instance, :instance__archival_object_id => :archival_object__id)
-           .left_outer_join(:sub_container, :sub_container__instance_id => :instance__id)
-           .left_outer_join(:top_container_link_rlshp, :top_container_link_rlshp__sub_container_id => :sub_container__id)
-           .left_outer_join(:top_container, :top_container__id => :top_container_link_rlshp__top_container_id)
-           .left_outer_join(:instance_do_link_rlshp, :instance_do_link_rlshp__instance_id => :instance__id)
-           .left_outer_join(:digital_object, :digital_object__id => :instance_do_link_rlshp__digital_object_id)
-           .left_outer_join(:file_version, :file_version__digital_object_id => :digital_object__id)
            .left_outer_join(:resource, :resource__id => :archival_object__root_record_id)
            .left_outer_join(:repository, :repository__id => :archival_object__repo_id)
-           .left_outer_join(:enumeration_value, { :level_enum__id => :archival_object__level_id }, :table_alias => :level_enum)
-           .left_outer_join(:enumeration_value, { :type_enum__id => :sub_container__type_2_id }, :table_alias => :type_enum)
            .filter(:archival_object__id => @ids)
-           .filter(:file_version__is_representative => true)
 
     # archival object bits
     ds = ds.select_append(Sequel.as(:archival_object__id, :archival_object_id))
-    ds = ds.select_append(Sequel.as(:archival_object__repo_id, :repo_id))
     ds = ds.select_append(Sequel.as(:archival_object__title, :archival_object_title))
-    ds = ds.select_append(Sequel.as(:level_enum__value, :archival_object_level))
     ds = ds.select_append(Sequel.as(:archival_object__ref_id, :identifier))
 
     # resource bits
@@ -108,23 +104,12 @@ class PsulExport
     ds = ds.select_append(Sequel.as(:resource__ead_id, :resource_ead_id))
     ds = ds.select_append(Sequel.as(:resource__ead_location, :resource_ead_location))
 
-    # digital object bits
-    ds = ds.select_append(Sequel.as(:file_version__file_uri, :file_uri))
-
-    # top container bits 
-    ds = ds.select_append(Sequel.as(:top_container__indicator, :top_container_indicator))
-    ds = ds.select_append(Sequel.as(:top_container__barcode, :top_container_barcode))
-
-    # sub_container bits
-    ds = ds.select_append(Sequel.as(:sub_container__indicator_2, :sub_container_indicator))
-    ds = ds.select_append(Sequel.as(:type_enum__value, :sub_container_type))
-
     # repository bits
     ds = ds.select_append(Sequel.as(:repository__repo_code, :repository_code))
 
-    prepare_resource_creation_dates
     prepare_ao_creation_dates
-    prepare_extents
+    prepare_container_labels
+    prepare_file_versions
 
     ds
   end
@@ -140,32 +125,41 @@ class PsulExport
     }.compact
   end
 
-  def prepare_resource_creation_dates
-    @all_resource_dates = {}
-    @resource_creation_dates = {}
+  def prepare_container_labels
+    @container_labels = {}
 
-    creation_enum_id = EnumerationValue
-                         .filter(:enumeration_id => Enumeration.filter(:name => 'date_label').select(:id))
-                         .filter(:value => 'creation')
-                         .select(:id)
-                         .first[:id]
-
-    ASDate
-      .filter(:date__resource_id => @resource_id)
-      .select(:resource_id,
-              :expression,
-              :begin,
-              :end,
-              Sequel.as(:date__date_type_id, :date_type_id),
-              Sequel.as(:date__label_id, :label_id))
+    TopContainer
+      .left_outer_join(:top_container_link_rlshp, :top_container_link_rlshp__top_container_id => :top_container__id)
+      .left_outer_join(:sub_container, :sub_container__id => :top_container_link_rlshp__sub_container_id)
+      .left_outer_join(:instance, :instance__id => :sub_container__instance_id)
+      .left_outer_join(:enumeration_value, { :top_container_type__id => :top_container__type_id }, :table_alias => :top_container_type)
+      .left_outer_join(:enumeration_value, { :sub_container_type__id => :sub_container__type_2_id }, :table_alias => :sub_container_type)
+      .filter(:instance__archival_object_id => @ids)
+      .select(Sequel.as(:instance__archival_object_id, :archival_object_id),
+              Sequel.join([:top_container_type__value, ' ', :top_container__indicator]).as(:top_container),
+              Sequel.join([:sub_container_type__value, ' ', :sub_container__indicator_2]).as(:sub_container))
       .each do |row|
-      @all_resource_dates[row[:resource_id]] ||= []
-      @all_resource_dates[row[:resource_id]] << row
+        @container_labels[row[:archival_object_id]] ||= []
+        @container_labels[row[:archival_object_id]] << row
+    end
+  end
 
-      if row[:label_id] == creation_enum_id
-        @resource_creation_dates[row[:resource_id]] ||= []
-        @resource_creation_dates[row[:resource_id]] << row
-      end
+  def prepare_file_versions
+    @file_versions = {}
+
+    FileVersion
+      .left_outer_join(:digital_object, :digital_object__id => :file_version__digital_object_id)
+      .left_outer_join(:instance_do_link_rlshp, :instance_do_link_rlshp__digital_object_id => :digital_object__id)
+      .left_outer_join(:instance, :instance__id => :instance_do_link_rlshp__instance_id)
+      .left_outer_join(:enumeration_value, { :instance_type__id => :instance__instance_type_id }, :table_alias => :instance_type)
+      .filter(:instance_type__value => 'digital_object')
+      .filter(:file_version__is_representative => true)
+      .filter(:instance__archival_object_id => @ids)
+      .select(Sequel.as(:instance__archival_object_id, :archival_object_id),
+              Sequel.as(:file_version__file_uri, :file_uri))
+      .each do |row|
+        @file_versions[row[:archival_object_id]] ||= []
+        @file_versions[row[:archival_object_id]] << row
     end
   end
 
@@ -216,16 +210,6 @@ class PsulExport
     end
   end
 
-  def parse_note(row)
-    note = ASUtils.json_parse(row[:note])
-
-    {
-      'type' => note.fetch('type', note.fetch('jsonmodel_type')),
-      'note' => note.to_h,
-    }
-  end
-
-
   def local_record_id(row)
     "/repositories/#{row[:repo_id]}/archival_objects/#{row[:archival_object_id]}"
   end
@@ -234,20 +218,18 @@ class PsulExport
     "#{row[:repository_code]}_#{row[:resource_ead_id]}_#{row[:identifier]}"
   end
 
+  def container_information(row)
+    container_labels_for_archival_object(row[:archival_object_id]).map{|row|
+      if row[:sub_container]
+        [row[:top_container], row[:sub_container]].compact.join(', ')
+      else
+        row[:top_container]
+      end
+    }
+  end
+  
   def file_uri(row)
-    row[:file_uri]
-  end
-
-  def box(row)
-    row[:top_container_indicator]
-  end
-
-  def barcode(row)
-    row[:top_container_barcode]
-  end
-
-  def folder(row)
-    row[:sub_container_indicator] if row[:sub_container_type] == 'folder'
+    file_versions_for_archival_object(row[:archival_object_id]).map{|row| row[:file_uri]}
   end
 
   def resource_title(row)
@@ -278,32 +260,8 @@ class PsulExport
     }.join(NEW_LINE_SEPARATOR)
   end
 
-
   def ead_location(row)
     row[:resource_ead_location]
-  end
-
-  def citation_note(row)
-    archival_object_citation = notes_for_archival_object(row[:archival_object_id])
-                                .map{|type, notes|
-                                  next unless type == 'prefercite'
-
-                                  notes_to_text(notes)
-                                }
-                                .compact
-                                .flatten
-
-    return archival_object_citation.join(NEW_LINE_SEPARATOR) unless archival_object_citation.empty?
-
-    notes_for_resource(row[:resource_id])
-      .map{|type, notes|
-        next unless type == 'prefercite'
-
-        notes_to_text(notes)
-      }
-      .compact
-      .flatten
-      .join(NEW_LINE_SEPARATOR)
   end
 
   def start_year(row)
@@ -358,31 +316,6 @@ class PsulExport
     else
       full_range.join(NEW_LINE_SEPARATOR)
     end
-  end
-
-  # What we'd like here is the dates from the Creation dates field formated as Inclusive/Single Date(s) (Bulk: Bulk Dates) if Bulk exists
-  # ex. 1924-1967 (Bulk: 1930-1939) or 1851 Nov. 3 or 1851-1853
-  # Clarification on cardinality:
-  #   There are cases where there is more than one inclusive/single creation date object for an item (ex. Nov 3 1892 and April 8 1893).
-  #   In cases like these, we would like each date object separated with a semi-color (so we would get "Nov 3 1892; April 8 1893").
-  # HM: assuming only zero or none bulk creation dates (i.e. only looking at the first).
-  # New requirement: 66 should be the collection date (if it exists)
-  def collection_creation_years(row)
-    dates = creation_dates_for_resource(@resource_id)
-
-    return if dates.empty?
-
-    non_bulk = dates.select{|d| d.date_type != 'bulk'}
-    bulk = dates.find{|d| d.date_type == 'bulk'}
-
-    def fmt_date(date) 
-      date[:expression] || [(date[:begin] || '').sub(/-.*/, ''), (date[:end] || '').sub(/-.*/, '')].select{|d| !d.empty?}.compact.uniq.join('-')
-    end
-
-    out = non_bulk.map{|d| fmt_date(d)}.join('; ')
-    out += " (Bulk: #{fmt_date(bulk)})" if bulk
-
-    out
   end
 
   def strip_html(string)
