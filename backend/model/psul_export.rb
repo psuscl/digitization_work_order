@@ -2,38 +2,25 @@ require 'write_xlsx'
 
 class PsulExport
 
-  NEW_LINE_SEPARATOR = ' | '
+  def column_definitions
+    [
+      {:header => "title", :proc => Proc.new {|row| title(row)}},
+      {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
+      {:header => "collection", :proc => Proc.new {|row| resource_title(row)}},
+      {:header => "dates", :proc => Proc.new {|row| date_string(row)}},
+      {:header => "finding aid", :proc => Proc.new {|row| ead_location(row)}},
+      {:header => "identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
+      {:header => "series", :proc => Proc.new {|row| series_title(row)}},
+      {:header => "subseries", :proc => Proc.new {|row| subseries_title(row)}},
+      {:header => "container information", :proc => Proc.new {|row| container_information(row)}},
+      {:header => "file url", :proc => Proc.new {|row| file_uri(row)}},
+    ]
+  end
 
   def initialize(uris, resource_uri)
     @uris = uris
-    @resource_uri = resource_uri
+    @resource = resource_uri
     @ids = extract_ids
-
-    parsed_resource_uri = JSONModel.parse_reference(@resource_uri)
-    @resource_id = parsed_resource_uri.fetch(:id)
-    parsed_repo_uri = JSONModel.parse_reference(parsed_resource_uri.fetch(:repository))
-    @repo_id = parsed_repo_uri.fetch(:id)
-  end
-
-  def column_definitions
-    [
-      # Title
-      {:header => "title", :proc => Proc.new {|row| title(row)}},
-      # Object URI
-      {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
-      # Date Created
-      {:header => "date created", :proc => Proc.new {|row| creation_date(row)}},
-      # Collection
-      {:header => "collection", :proc => Proc.new {|row| resource_title(row)}},
-      # Finding Aid
-      {:header => "finding aid", :proc => Proc.new {|row| ead_location(row)}},
-      # Identifier
-      {:header => "identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
-      # Container Information
-      {:header => "container information", :proc => Proc.new{|row| container_information(row)}},
-      # URL
-      {:header => "url", :proc => Proc.new {|row| file_uri(row)}},
-    ]
   end
 
   def to_stream
@@ -42,27 +29,28 @@ class PsulExport
 
     sheet = wb.add_worksheet('Digitization Work Order')
 
-    hl_color = wb.set_custom_color(15, '#E8F4FF')
-    highlight = wb.add_format(:bg_color => 15)
-
     row_ix = 0
     sheet.write_row(row_ix, 0, column_definitions.collect{|col| col.fetch(:header)})
 
-    # PLEASE NOTE
-    # `dataset` hits the database to return all the instance rows but it also
-    # fire a series of extra queries from which we aggregate all multi-valued
-    # fields required for the report. These values are stored as instance
-    # variables and as such many of the helper methods will only return data
-    # once `dataset` has been called.
     dataset.all.sort{|x,y| @ids.index(x[:archival_object_id]) <=> @ids.index(y[:archival_object_id])}.each do |row|
       row_ix += 1
-      row_style = nil
-      
-      sheet.write_row(row_ix, 0, column_definitions.map {|col| col[:proc].call(row) }, row_style)
+      sheet.write_row(row_ix, 0, column_definitions.map {|col| col[:proc].call(row) })
     end
 
     wb.close
     io.string
+  end
+
+  def series_for_object(id)
+    @series.fetch(id, [])
+           .collect{|ao| strip_html(ao.fetch('title'))}
+           .join('.')
+  end
+
+  def subseries_for_object(id)
+    @subseries.fetch(id, [])
+              .collect{|ao| strip_html(ao.fetch('title'))}
+              .join('.')
   end
 
   def container_labels_for_archival_object(id)
@@ -73,19 +61,13 @@ class PsulExport
     @file_versions.fetch(id, [])
   end
 
-  def creation_dates_for_archival_object(id)
-    @creation_dates.fetch(id, [])
+  def date_string_for_archival_object(id)
+    @dates.fetch(id, [])
   end
 
-  def all_dates_for_archival_object(id)
-    @all_dates.fetch(id, [])
-  end
-
-  def extents_for_archival_object(id)
-    @extents.fetch(id, [])
-  end
 
   private
+
 
   def dataset
     ds = ArchivalObject
@@ -107,9 +89,10 @@ class PsulExport
     # repository bits
     ds = ds.select_append(Sequel.as(:repository__repo_code, :repository_code))
 
-    prepare_ao_creation_dates
+    prepare_breadcrumbs
     prepare_container_labels
     prepare_file_versions
+    prepare_dates
 
     ds
   end
@@ -123,6 +106,127 @@ class PsulExport
 
       parsed[:id]
     }.compact
+  end
+
+  def title(row)
+    strip_html(row[:archival_object_title])
+  end
+
+  def local_record_id(row)
+    "/repositories/#{row[:repo_id]}/archival_objects/#{row[:archival_object_id]}"
+  end
+  
+  def resource_title(row)
+    strip_html(row[:resource_title])
+  end
+
+  def ead_location(row)
+    strip_html(row[:resource_ead_location])
+  end
+
+  def digital_object_identifier(row)
+    [row[:repository_code], row[:resource_ead_id], row[:identifier]].join('_')
+  end
+
+  def series_title(row)
+    series_for_object(row[:archival_object_id])
+  end
+
+  def subseries_title(row)
+    subseries_for_object(row[:archival_object_id])
+  end
+
+  def container_information(row)
+    container_labels_for_archival_object(row[:archival_object_id]).map{|row|
+      if row[:sub_container]
+        [row[:top_container], row[:sub_container]].compact.join(', ')
+      else
+        row[:top_container]
+      end
+    }
+  end
+  
+  def file_uri(row)
+    file_versions_for_archival_object(row[:archival_object_id]).map{|row| row[:file_uri]}
+  end
+
+  def date_string(row)
+    date_string_for_archival_object(row[:archival_object_id]).map{|date|
+      if (date[:begin] || date[:end])
+        dates = [date[:begin], date[:end]].compact.join('--')
+      else
+        dates = date[:expression]
+      end
+      "#{date[:label]}: #{dates}"
+    }.join('; ')
+  end
+
+  def prepare_breadcrumbs
+    child_to_parent_map = {}
+    node_to_position_map = {}
+    node_to_root_record_map = {}
+    node_to_data_map = {}
+
+    @series = {}
+    @subseries = {}
+
+    DB.open do |db|
+      nodes_to_expand = @ids
+
+      while !nodes_to_expand.empty?
+        next_nodes_to_expand = []
+
+        db[:archival_object]
+          .left_outer_join(:enumeration_value, { :level_enum__id => :archival_object__level_id }, :table_alias => :level_enum)
+          .filter(:archival_object__id => nodes_to_expand)
+          .select(Sequel.as(:archival_object__id, :id),
+                  Sequel.as(:archival_object__parent_id, :parent_id),
+                  Sequel.as(:archival_object__root_record_id, :root_record_id),
+                  Sequel.as(:archival_object__position, :position),
+                  Sequel.as(:archival_object__title, :title),
+                  Sequel.as(:archival_object__display_string, :display_string),
+                  Sequel.as(:archival_object__component_id, :component_id),
+                  Sequel.as(:level_enum__value, :level),
+                  Sequel.as(:archival_object__other_level, :other_level))
+          .each do |row|
+          child_to_parent_map[row[:id]] = row[:parent_id]
+          node_to_position_map[row[:id]] = row[:position]
+          node_to_data_map[row[:id]] = row
+          node_to_root_record_map[row[:id]] = row[:root_record_id]
+          next_nodes_to_expand << row[:parent_id]
+        end
+
+        nodes_to_expand = next_nodes_to_expand.compact.uniq
+      end
+
+      @ids.each do |node_id|
+        s = []
+        ss = []
+
+        current_node = node_id
+        while child_to_parent_map[current_node]
+          parent_node = child_to_parent_map[current_node]
+
+          data = node_to_data_map.fetch(parent_node)
+
+          obj = {"uri" => JSONModel::JSONModel(:archival_object).uri_for(parent_node, :repo_id => @repo_id),
+                   "display_string" => data.fetch(:display_string),
+                   "title" => data.fetch(:title),
+                   "level" => data[:other_level] || data[:level]}
+          
+          if obj['level'] == "series"
+            s << obj
+          elsif obj['level'] == "subseries"
+            ss << obj
+          end
+
+          current_node = parent_node
+        end
+
+        @series[node_id] = s.reverse
+        @subseries[node_id] = ss.reverse
+      end
+    end
   end
 
   def prepare_container_labels
@@ -163,160 +267,23 @@ class PsulExport
     end
   end
 
-  def prepare_ao_creation_dates
-    @all_dates = {}
-    @creation_dates = {}
-
-    creation_enum_id = EnumerationValue
-                         .filter(:enumeration_id => Enumeration.filter(:name => 'date_label').select(:id))
-                         .filter(:value => 'creation')
-                         .select(:id)
-                         .first[:id]
+  def prepare_dates
+    @dates = {}
 
     ASDate
+      .left_outer_join(:enumeration_value, {:date_label__id => :date__label_id}, :table_alias => :date_label)
       .filter(:date__archival_object_id => @ids)
-      .select(:archival_object_id,
-              :expression,
-              :begin,
-              :end,
-              Sequel.as(:date__date_type_id, :date_type_id),
-              Sequel.as(:date__label_id, :label_id))
-      .each do |row|
-      @all_dates[row[:archival_object_id]] ||= []
-      @all_dates[row[:archival_object_id]] << row
-
-      if row[:label_id] == creation_enum_id
-        @creation_dates[row[:archival_object_id]] ||= []
-        @creation_dates[row[:archival_object_id]] << row
-      end
+      .select(Sequel.as(:date__archival_object_id, :archival_object_id),
+              Sequel.as(:date_label__value, :label),
+              Sequel.as(:date__begin, :begin),
+              Sequel.as(:date__end, :end),
+              Sequel.as(:date__expression, :expression))
+        .each do |date|
+        @dates[date[:archival_object_id]] ||= []
+        @dates[date[:archival_object_id]] << date
     end
   end
 
-  def prepare_extents
-    @extents = {}
-
-    Extent
-     .left_outer_join(:enumeration_value, { :portion_enum__id => :extent__portion_id }, :table_alias => :portion_enum)
-     .left_outer_join(:enumeration_value, { :extent_type_enum__id => :extent__extent_type_id }, :table_alias => :extent_type_enum)
-     .filter(:extent__archival_object_id => @ids)
-     .select(Sequel.as(:extent__archival_object_id, :archival_object_id),
-             Sequel.as(:portion_enum__value, :portion),
-             Sequel.as(:extent_type_enum__value, :extent_type),
-             Sequel.as(:extent__number, :number))
-     .each do |row|
-
-      @extents[row[:archival_object_id]] ||= []
-      @extents[row[:archival_object_id]] << row
-    end
-  end
-
-  def local_record_id(row)
-    "/repositories/#{row[:repo_id]}/archival_objects/#{row[:archival_object_id]}"
-  end
-
-  def digital_object_identifier(row)
-    "#{row[:repository_code]}_#{row[:resource_ead_id]}_#{row[:identifier]}"
-  end
-
-  def container_information(row)
-    container_labels_for_archival_object(row[:archival_object_id]).map{|row|
-      if row[:sub_container]
-        [row[:top_container], row[:sub_container]].compact.join(', ')
-      else
-        row[:top_container]
-      end
-    }
-  end
-  
-  def file_uri(row)
-    file_versions_for_archival_object(row[:archival_object_id]).map{|row| row[:file_uri]}
-  end
-
-  def resource_title(row)
-    strip_html(row[:resource_title])
-  end
-
-  def title(row)
-    strip_html(row[:archival_object_title])
-  end
-
-  def creator(row)
-    creators_for_archival_object(row[:archival_object_id])
-      .map{|row| (row[:person] || row[:corporate_entity] || row[:family] || row[:software])}
-      .join(NEW_LINE_SEPARATOR)
-  end
-
-  def creation_date(row)
-    creation_dates_for_archival_object(row[:archival_object_id])
-      .map{|row| [row[:begin], row[:end]].compact.join(' - ') || row[:expression]}
-      .join(NEW_LINE_SEPARATOR)
-  end
-
-  def physical_description(row)
-    extents_for_archival_object(row[:archival_object_id]).map{|row|
-      type = I18n.t("enumerations.extent_extent_type.#{row[:extent_type]}",
-                    :default => row[:extent_type])
-      "#{row[:number]} #{type}"
-    }.join(NEW_LINE_SEPARATOR)
-  end
-
-  def ead_location(row)
-    row[:resource_ead_location]
-  end
-
-  def start_year(row)
-    all_years(row, :start)
-  end
-
-  def end_year(row)
-    all_years(row, :end)
-  end
-
-  def all_years(row, mode = :range)
-    dates = all_dates_for_archival_object(row[:archival_object_id])
-
-    return if dates.empty?
-
-    ranges = []
-
-    dates.each do |date|
-      from = nil
-      to = nil
-
-      if date[:begin] && date[:begin] =~ /^[0-9][0-9][0-9][0-9]/
-        year = date[:begin][0..3].to_i
-        from = [from, year].compact.min
-        to = year if to.nil?
-      end
-
-      if date[:end] && date[:end] =~ /^[0-9][0-9][0-9][0-9]/
-        year = date[:end][0..3].to_i
-        from = [from, year].compact.min
-        to = [to, year].compact.max
-      end
-
-      next if from.nil?
-
-      ranges << [from, to]
-    end
-
-    return if ranges.empty?
-
-    full_range = ranges
-      .collect{|r| (r[0]..r[1]).to_a}
-      .flatten
-      .uniq
-      .sort
-
-    case mode
-    when :start
-      full_range.first
-    when :end
-      full_range.last
-    else
-      full_range.join(NEW_LINE_SEPARATOR)
-    end
-  end
 
   def strip_html(string)
     return if string.nil?
