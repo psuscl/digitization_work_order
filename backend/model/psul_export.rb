@@ -152,10 +152,10 @@ class PsulExport
 
   def date_string(row)
     date_string_for_archival_object(row[:archival_object_id]).map{|date|
-      if (date[:begin] || date[:end])
-        dates = [date[:begin], date[:end]].compact.join('--')
-      else
+      if date[:expression]
         dates = date[:expression]
+      else
+        dates = [date[:begin], date[:end]].compact.join('--')
       end
       "#{date[:label]}: #{dates}"
     }.join('; ')
