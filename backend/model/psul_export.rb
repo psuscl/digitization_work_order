@@ -5,6 +5,7 @@ class PsulExport
   def column_definitions
     [
       {:header => "title", :proc => Proc.new {|row| title(row)}},
+      {:header => "report_type", :proc => Proc.new {|row| report_type(row)}},
       {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
       {:header => "collection", :proc => Proc.new {|row| resource_title(row)}},
       {:header => "dates", :proc => Proc.new {|row| date_string(row)}},
@@ -17,9 +18,10 @@ class PsulExport
     ]
   end
 
-  def initialize(uris, resource_uri)
+  def initialize(uris, resource_uri, type)
     @uris = uris
     @resource = resource_uri
+    @type = type
     @ids = extract_ids
   end
 
@@ -110,6 +112,10 @@ class PsulExport
 
   def title(row)
     strip_html(row[:archival_object_title])
+  end
+
+  def report_type(row)
+    @type
   end
 
   def local_record_id(row)

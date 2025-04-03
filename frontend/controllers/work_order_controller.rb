@@ -26,7 +26,7 @@ class WorkOrderController < ApplicationController
 
   def generate_psul_export
     uri = "/plugins/digitization_work_order/repositories/#{session[:repo_id]}/psul"
-    args = {'uri[]' => JSON.parse(params[:selected]), 'resource_uri' => params[:resource]}
+    args = {'uri[]' => JSON.parse(params[:selected]), 'resource_uri' => params[:resource], 'export_type' => params[:export_type]}
 
     generate_response(uri, args)
   end

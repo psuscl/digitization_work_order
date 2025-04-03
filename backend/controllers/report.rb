@@ -76,7 +76,8 @@ class ArchivesSpaceService < Sinatra::Base
     .description("Return Excel formatted export for record uris")
     .params(["repo_id", :repo_id],
             ["uri", [String], "The uris of the records to include in the report"],
-            ["resource_uri", String, "The resource URI"])
+            ["resource_uri", String, "The resource URI"],
+            ["export_type", String, "The report type being generated"])
     .permissions([:view_repository])
     .returns([200, "report"]) \
   do
@@ -86,7 +87,7 @@ class ArchivesSpaceService < Sinatra::Base
         "Content-Type" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition" => "attachment; filename=\"#{psul_export_filename(JSONModel.parse_reference(params[:resource_uri]).fetch(:id))}\""
       },
-      PsulExport.new(params[:uri], params[:resource_uri]).to_stream
+      PsulExport.new(params[:uri], params[:resource_uri], params[:export_type]).to_stream
     ]
   end
 
