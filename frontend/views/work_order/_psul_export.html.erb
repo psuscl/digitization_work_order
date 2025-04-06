@@ -3,8 +3,10 @@
 <%= form_tag({:controller => :work_order, :action => :generate_psul_export}, {:method => 'post', :id => "work_order_form"}) do |form| %>
   <%= hidden_field_tag "resource", @uri %>
   <div class="form-group row required">
-    <%= label_tag "export_type", t('plugins.digitization_work_order.export_type'), :class => "col-2 control-label" %>
-    <%= select_tag "export_type", options_for_select(label_options.map{|opt| [t("plugins.digitization_work_order.export_types.#{opt}"), opt]}), :class => "col-6 form-control" %>
+    <%= label_tag "export_type", t('plugins.digitization_work_order.export_type'), :class => "col-2 control-label text-right" %>
+    <div class="col-6">
+      <%= select_tag "export_type", options_for_select(label_options.map{|opt| [t("plugins.digitization_work_order.export_types.#{opt}"), opt]}), :class => "form-control" %>
+    </div>
   </div>
   <div class="report-fields"></div>
 
