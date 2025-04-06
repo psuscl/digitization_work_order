@@ -2,22 +2,6 @@ require 'write_xlsx'
 
 class PsulExport
 
-  def column_definitions
-    [
-      {:header => "title", :proc => Proc.new {|row| title(row)}},
-      {:header => "report_type", :proc => Proc.new {|row| report_type(row)}},
-      {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
-      {:header => "collection", :proc => Proc.new {|row| resource_title(row)}},
-      {:header => "dates", :proc => Proc.new {|row| date_string(row)}},
-      {:header => "finding aid", :proc => Proc.new {|row| ead_location(row)}},
-      {:header => "identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
-      {:header => "series", :proc => Proc.new {|row| series_title(row)}},
-      {:header => "subseries", :proc => Proc.new {|row| subseries_title(row)}},
-      {:header => "container information", :proc => Proc.new {|row| container_information(row)}},
-      {:header => "file url", :proc => Proc.new {|row| file_uri(row)}},
-    ]
-  end
-
   def initialize(uris, resource_uri, type)
     @uris = uris
     @resource = resource_uri
@@ -25,14 +9,73 @@ class PsulExport
     @ids = extract_ids
   end
 
+  # we want different column headings depending on which report type is selected
+  def column_definitions
+    case @type
+    
+    when 'access' # for a generic CONTENTdm collection
+      [
+        {:header => "title", :proc => Proc.new {|row| title(row)}},
+        {:header => "archival object", :proc => Proc.new{|row| local_record_id(row)}},
+        {:header => "collection", :proc => Proc.new {|row| resource_title(row)}},
+        {:header => "dates", :proc => Proc.new {|row| date_string(row)}},
+        {:header => "finding aid", :proc => Proc.new {|row| ead_location(row)}},
+        {:header => "identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
+        {:header => "series", :proc => Proc.new {|row| series_title(row)}},
+        {:header => "subseries", :proc => Proc.new {|row| subseries_title(row)}},
+        {:header => "container information", :proc => Proc.new {|row| container_information(row)}},
+        {:header => "file url", :proc => Proc.new {|row| file_uri(row)}},
+      ]
+    
+    when 'media' # for Kaltura batch imports
+      [
+        {:header => "Video Title", :proc => Proc.new {|row| title(row)}},
+        {:header => "Owner", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Date of Recording", :proc => Proc.new {|row| date_string(row)}},
+        {:header => "URL", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Description", :proc => Proc.new {|row| nil}}, #BLANK! (unless we can get an abstract)
+        {:header => "Tags", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Reference ID", :proc => Proc.new {|row| digital_object_identifier(row)}},
+        {:header => "Thumbnail URL", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Caption URL", :proc => Proc.new {|row| nil}} #BLANK!
+      ]
+    
+    when 'preservation' # for LIBSAFE
+      [
+        {:header => "Title", :proc => Proc.new {|row| title(row)}},
+        {:header => "Creator", :proc => Proc.new {|row| nil}}, #BLANK! (until we get a function to populate it)
+        {:header => "Identifier", :proc => Proc.new {|row| digital_object_identifier(row)}},
+        {:header => "Date Created", :proc => Proc.new {|row| date_string(row)}},
+        {:header => "Description", :proc => Proc.new {|row| nil}}, #BLANK! (unless we can get an abstract)
+        {:header => "Language", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Rights Status", :proc => Proc.new {|row| "http://rightsstatements.org/vocab/InC/1.0"}}, # default to in copyright
+        {:header => "Access Rights", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Access ARK", :proc => Proc.new {|row| nil}},
+        {:header => "Preservation ARK", :proc => Proc.new {|row| nil}},
+        {:header => "DOI", :proc => Proc.new {|row| nil}},
+        {:header => "Level of Digital Preservation Commitment", :proc => Proc.new {|row| nil}},
+        {:header => "Resource Type", :proc => Proc.new {|row| nil}},
+        {:header => "Work Type", :proc => Proc.new {|row| nil}},
+        {:header => "Digital Status", :proc => Proc.new {|row| nil}},
+        {:header => "Content Stream", :proc => Proc.new {|row| nil}},
+        {:header => "Collection", :proc => Proc.new {|row| resource_title(row)}},
+        {:header => "Note", :proc => Proc.new {|row| nil}}, #BLANK!
+        {:header => "Current Location", :proc => Proc.new {|row| nil}}
+      ]
+    end
+  end
+
   def to_stream
     io = StringIO.new
     wb = WriteXLSX.new(io)
+    
+    header = wb.add_format
+    header.set_bold
 
     sheet = wb.add_worksheet('Digitization Work Order')
 
     row_ix = 0
-    sheet.write_row(row_ix, 0, column_definitions.collect{|col| col.fetch(:header)})
+    sheet.write_row(row_ix, 0, column_definitions.collect{|col| col.fetch(:header)}, header)
 
     dataset.all.sort{|x,y| @ids.index(x[:archival_object_id]) <=> @ids.index(y[:archival_object_id])}.each do |row|
       row_ix += 1
