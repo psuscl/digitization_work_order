@@ -22,3 +22,8 @@ en:
         message: Creating a work order will auto-create and assign Component Unique IDs (CUIDs) to archival objects in the work order that don't currently have CUIDs
         warning: Records may be updated.
         download_button: Download Work Order
+      export_type: Export Type
+      export_types:
+        access: Digital Collections
+        media: Kaltura
+        preservation: LIBSAFE
