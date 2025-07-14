@@ -2,7 +2,7 @@ en:
   plugins:
     digitization_work_order:
       form_title: Work Order Form
-      toolbar_button: Work Order Report
+      toolbar_button: Digital Collections Work Order
       loading: Loading...
       show_work_order_modal_button: Download Work Order ...
       download_report_button: Download Report

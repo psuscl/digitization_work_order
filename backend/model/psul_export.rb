@@ -48,7 +48,7 @@ class PsulExport
         {:header => "Date Created", :proc => Proc.new {|row| date_string(row)}},
         {:header => "Description", :proc => Proc.new {|row| nil}}, #BLANK! (unless we can get an abstract)
         {:header => "Language", :proc => Proc.new {|row| nil}}, #BLANK!
-        {:header => "Rights Status", :proc => Proc.new {|row| "http://rightsstatements.org/vocab/InC/1.0"}}, # default to in copyright
+        {:header => "Rights Status", :proc => Proc.new {|row| "http://rightsstatements.org/vocab/InC/1.0/"}}, # default to in copyright
         {:header => "Access Rights", :proc => Proc.new {|row| nil}}, #BLANK!
         {:header => "Access ARK", :proc => Proc.new {|row| nil}},
         {:header => "Preservation ARK", :proc => Proc.new {|row| nil}},
